@@ -5,6 +5,8 @@ PointCloudXYZI::Ptr normvec(new PointCloudXYZI(100000, 1));
 std::vector<int> time_seq;
 PointCloudXYZI::Ptr feats_down_body(new PointCloudXYZI(10000, 1));
 PointCloudXYZI::Ptr feats_down_world(new PointCloudXYZI(10000, 1));
+PointCovVector pv_list;
+std::vector<PointPlane> ptpl_list;
 std::vector<V3D> pbody_list;
 std::vector<PointVector> Nearest_Points; 
 std::shared_ptr<IVoxType> ivox_ = nullptr;                    // localmap in ivox
@@ -127,7 +129,26 @@ void h_model_input(state_input &s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_R,
 		p_world << point_world_j.x, point_world_j.y, point_world_j.z;
 		{
 			auto &points_near = Nearest_Points[idx+j+1];
-            ivox_->GetClosestPoint(point_world_j, points_near, NUM_MATCH_POINTS); // 
+            //ivox_->GetClosestPoint(point_world_j, points_near, NUM_MATCH_POINTS); // 
+			
+			//std::vector<PointWithCov> points;
+			PointCovVector points;
+			PointWithCov point_world;
+			point_world.x = point_world_j.x;
+			point_world.y = point_world_j.y;
+			point_world.z = point_world_j.z;
+			point_world.intensity = point_world_j.intensity;
+			ivox_->GetClosestPoint(point_world, points, NUM_MATCH_POINTS);
+			points_near.clear();
+			for (auto &pnt: points) {
+				PointType pt;
+				pt.x = pnt.x;
+				pt.y = pnt.y;
+				pt.z = pnt.z;
+				pt.intensity = pnt.intensity;
+				points_near.emplace_back(pt);
+			}
+			
 			if ((points_near.size() < NUM_MATCH_POINTS)) // || pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5) // 5)
 			{
 				point_selected_surf[idx+j+1] = false;
@@ -175,7 +196,8 @@ void h_model_input(state_input &s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_R,
 		ekfom_data.valid = false;
 		return;
 	}
-	ekfom_data.M_Noise = laser_point_cov;
+	//ekfom_data.M_Noise = laser_point_cov;
+	ekfom_data.M_Noise.resize(effect_num_k);
 	ekfom_data.h_x.resize(effect_num_k, 12);
 	ekfom_data.h_x = Eigen::MatrixXd::Zero(effect_num_k, 12);
 	ekfom_data.z.resize(effect_num_k);
@@ -203,12 +225,13 @@ void h_model_input(state_input &s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_R,
 			else
 			{   
 				M3D point_crossmat = crossmat_list[idx+j+1];
-				V3D C(s.rot.transpose() * norm_vec); // conjugate().normalized()
+				V3D C(s.rot.transpose() * norm_vec); // transpose().normalized()
 				V3D A(point_crossmat * C);
 				ekfom_data.h_x.block<1, 12>(m, 0) << norm_vec(0), norm_vec(1), norm_vec(2), VEC_FROM_ARRAY(A), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
 			}
 			ekfom_data.z(m) = -norm_vec(0) * feats_down_world->points[idx+j+1].x -norm_vec(1) * feats_down_world->points[idx+j+1].y -norm_vec(2) * feats_down_world->points[idx+j+1].z-normvec->points[j].intensity;
-			
+			ekfom_data.M_Noise(m) = laser_point_cov;
+
 			m++;
 		}
 	}
@@ -221,57 +244,72 @@ void h_model_output(state_output &s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_
 	VF(4) pabcd;
 	pabcd.setZero();
 	normvec->resize(time_seq[k]);
+	ptpl_list.resize(time_seq[k]);
 	int effect_num_k = 0;
 	for (int j = 0; j < time_seq[k]; j++)
 	{
 		PointType &point_body_j  = feats_down_body->points[idx+j+1];
 		PointType &point_world_j = feats_down_world->points[idx+j+1];
+		PointWithCov &pv = pv_list[idx+j+1];
+		PointPlane &ptpl = ptpl_list[j];
+
 		pointBodyToWorld(&point_body_j, &point_world_j); 
 		V3D p_body = pbody_list[idx+j+1];
 		double p_norm = p_body.norm();
 		V3D p_world;
 		p_world << point_world_j.x, point_world_j.y, point_world_j.z;
+
+		ptpl.point_b = p_body;
+		ptpl.point_w = p_world;
+		ptpl.cov_b = pv.cov;
+		ptpl.cov_w = calcWorldCov(p_body, pv.cov, kf_output);
 		{
 			auto &points_near = Nearest_Points[idx+j+1];
 			
-            ivox_->GetClosestPoint(point_world_j, points_near, NUM_MATCH_POINTS); // 
+            //ivox_->GetClosestPoint(point_world_j, points_near, NUM_MATCH_POINTS); // 
+
+			PointCovVector points;
+			PointWithCov point_world;
+			point_world.x = point_world_j.x;
+			point_world.y = point_world_j.y;
+			point_world.z = point_world_j.z;
+			point_world.intensity = point_world_j.intensity;
+			ivox_->GetClosestPoint(point_world, points, NUM_MATCH_POINTS);
+			points_near.clear();
+			for (auto &pnt: points) {
+				PointType pt;
+				pt.x = pnt.x;
+				pt.y = pnt.y;
+				pt.z = pnt.z;
+				pt.intensity = pnt.intensity;
+				points_near.emplace_back(pt);
+			}
 			
 			if ((points_near.size() < NUM_MATCH_POINTS)) // || pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5)
 			{
 				point_selected_surf[idx+j+1] = false;
+				ptpl.selected = false;
 			}
 			else
 			{
 				point_selected_surf[idx+j+1] = false;
-				if (esti_plane(pabcd, points_near, plane_thr)) //(planeValid)
+				ptpl.selected = false;
+				
+				if (esti_plane_cov(ptpl, points, plane_thr)) //(planeValid)
 				{
-					float pd2 = fabs(pabcd(0) * point_world_j.x + pabcd(1) * point_world_j.y + pabcd(2) * point_world_j.z + pabcd(3));
-					// V3D norm_vec;
-					// M3D Rpf, pf;
-					// pf = crossmat_list[idx+j+1];
-					// // pf << SKEW_SYM_MATRX(p_body);
-					// Rpf = s.rot * pf;
-					// norm_vec << pabcd(0), pabcd(1), pabcd(2);
-					// double noise_state = norm_vec.transpose() * (cov_p+Rpf*cov_R*Rpf.transpose())  * norm_vec + sqrt(p_norm) * 0.001;
-					// // if (p_norm > match_s * pd2 * pd2)
-					// double epsilon = pd2 / sqrt(noise_state);
-					// double weight = 1.0; // epsilon / sqrt(epsilon * epsilon+1);
-					// if (epsilon > 1.0) 
-					// {
-					// 	weight = sqrt(2 * epsilon - 1) / epsilon;
-					// 	pabcd(0) = weight * pabcd(0);
-					// 	pabcd(1) = weight * pabcd(1);
-					// 	pabcd(2) = weight * pabcd(2);
-					// 	pabcd(3) = weight * pabcd(3);
-					// }
-					if (p_norm > match_s * pd2 * pd2)
+					ptpl.is_plane = true;
+					ptpl.res = ptpl.normal.dot(ptpl.point_w) + ptpl.d;
+
+					Matrix<double, 1, 6> J_nq;
+            		J_nq.block<1, 3>(0, 0) = ptpl.point_w - ptpl.center;
+            		J_nq.block<1, 3>(0, 3) = -ptpl.normal;
+
+					double sigma = J_nq * ptpl.cov_plane * J_nq.transpose() + ptpl.normal.dot(ptpl.cov_w * ptpl.normal);
+
+					bool chk = cov_on? abs(ptpl.res) < sigma_num * sqrt(sigma) : p_norm > match_s * ptpl.res * ptpl.res;
+					if (chk)
 					{
-						// point_selected_surf[i] = true;
-						point_selected_surf[idx+j+1] = true;
-						normvec->points[j].x = pabcd(0);
-						normvec->points[j].y = pabcd(1);
-						normvec->points[j].z = pabcd(2);
-						normvec->points[j].intensity = pabcd(3);
+						ptpl.selected = true;
 						effect_num_k ++;
 					}
 				}  
@@ -283,7 +321,8 @@ void h_model_output(state_output &s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_
 		ekfom_data.valid = false;
 		return;
 	}
-	ekfom_data.M_Noise = laser_point_cov;
+	//ekfom_data.M_Noise = laser_point_cov;
+	ekfom_data.M_Noise.resize(effect_num_k);
 	ekfom_data.h_x.resize(effect_num_k, 12);
 	ekfom_data.h_x = Eigen::MatrixXd::Zero(effect_num_k, 12);
 	ekfom_data.z.resize(effect_num_k);
@@ -291,32 +330,25 @@ void h_model_output(state_output &s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_
 	for (int j = 0; j < time_seq[k]; j++)
 	{
 		// ekfom_data.converge = false;
-		if(point_selected_surf[idx+j+1])
-		{
-			V3D norm_vec(normvec->points[j].x, normvec->points[j].y, normvec->points[j].z);
-			if (extrinsic_est_en)
-			{
-				V3D p_body = pbody_list[idx+j+1];
-				M3D p_crossmat, p_imu_crossmat;
-				p_crossmat << SKEW_SYM_MATRX(p_body);
-				V3D point_imu = s.offset_R_L_I * p_body + s.offset_T_L_I;
-				p_imu_crossmat << SKEW_SYM_MATRX(point_imu);
-				V3D C(s.rot.transpose() * norm_vec);
-				V3D A(p_imu_crossmat * C);
-				V3D B(p_crossmat * s.offset_R_L_I.transpose() * C);
-				ekfom_data.h_x.block<1, 12>(m, 0) << norm_vec(0), norm_vec(1), norm_vec(2), VEC_FROM_ARRAY(A), VEC_FROM_ARRAY(B), VEC_FROM_ARRAY(C);
-			}
-			else
-			{   
-				M3D point_crossmat = crossmat_list[idx+j+1];
-				V3D C(s.rot.transpose() * norm_vec); // conjugate().normalized()
-				V3D A(point_crossmat * C);
-				ekfom_data.h_x.block<1, 12>(m, 0) << norm_vec(0), norm_vec(1), norm_vec(2), VEC_FROM_ARRAY(A), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-			}
-			ekfom_data.z(m) = -norm_vec(0) * feats_down_world->points[idx+j+1].x -norm_vec(1) * feats_down_world->points[idx+j+1].y -norm_vec(2) * feats_down_world->points[idx+j+1].z-normvec->points[j].intensity;
+		PointPlane &ptpl = ptpl_list[j];
+		if (ptpl.selected) {
+			M3D point_crossmat = crossmat_list[idx+j+1];
+			V3D C(s.rot.transpose() * ptpl.normal); // transpose().normalized()
+			V3D A(point_crossmat * C);
+			ekfom_data.h_x.block<1, 12>(m, 0) << ptpl.normal(0), ptpl.normal(1), ptpl.normal(2), VEC_FROM_ARRAY(A), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+			ekfom_data.z(m) = -ptpl.res;
 			
+			auto &s = kf_output.get_x();
+			M3D R_cov_Rt = s.rot * s.offset_R_L_I * ptpl.cov_b * s.offset_R_L_I.transpose() * s.rot.transpose();
+            Eigen::Matrix<double, 1, 6> J_nq;
+            J_nq.block<1, 3>(0, 0) = ptpl.point_w - ptpl.center;
+            J_nq.block<1, 3>(0, 3) = -ptpl.normal;
+            double sigma_l = J_nq * ptpl.cov_plane * J_nq.transpose();
+			ekfom_data.M_Noise(m) = cov_on? sigma_l + ptpl.normal.transpose() * R_cov_Rt * ptpl.normal : laser_point_cov;
+
 			m++;
 		}
+		
 	}
 	effct_feat_num += effect_num_k;
 }
@@ -399,4 +431,34 @@ void pointBodyToWorld(PointType const * const pi, PointType * const po)
     po->y = p_global(1);
     po->z = p_global(2);
     po->intensity = pi->intensity;
+}
+
+Matrix3d calcLidarCov(const Vector3d &p_lidar, const double ranging_cov, const double angle_cov) {
+	double range2 = p_lidar.squaredNorm();
+    Matrix3d wwT = p_lidar * p_lidar.transpose() / range2;
+    //return ranging_cov * wwT + angle_cov * range2 * (Eye3d - wwT);
+	return ranging_cov * wwT + angle_cov * sqrt(range2) * (Eye3d - wwT);
+	//return ranging_cov * wwT + angle_cov * (Eye3d - wwT);
+}
+
+Matrix3d calcWorldCov(const Vector3d &p_lidar, const Matrix3d &cov_lidar, esekfom::esekf<state_output, 30, input_ikfom> &kf_output) {
+    Matrix3d p_lidar_x;
+    p_lidar_x << SKEW_SYM_MATRX(p_lidar);
+	auto &state = kf_output.get_x();
+
+    // lidar->body
+    Matrix3d cov_body = state.offset_R_L_I * cov_lidar * state.offset_R_L_I.transpose();
+
+    // body->world
+    Vector3d p_body = state.offset_R_L_I * p_lidar + state.offset_T_L_I;
+    Matrix3d p_body_x;
+    p_body_x << SKEW_SYM_MATRX(p_body);
+
+    Matrix3d cov_rot = kf_output.get_P().block<3, 3>(3, 3);
+    Matrix3d cov_t = kf_output.get_P().block<3, 3>(0, 0);
+    Matrix3d cov_world = state.rot * cov_body * state.rot.transpose() 
+        			   + state.rot * p_body_x * cov_rot * p_body_x.transpose() * state.rot.transpose() 
+        			   + cov_t;
+
+    return cov_world;
 }

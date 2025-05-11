@@ -63,7 +63,8 @@ struct dyn_share_modified
 {
 	bool valid;
 	bool converge;
-	T M_Noise;
+	//T M_Noise;
+	Eigen::Matrix<T, Eigen::Dynamic, 1> M_Noise;
 	Eigen::Matrix<T, Eigen::Dynamic, 1> z;
 	Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> h_x;
 	Eigen::Matrix<T, 6, 1> z_IMU;
@@ -185,7 +186,8 @@ public:
 		dyn_share_modified<scalar_type> dyn_share;
 		state x_propagated = x_;
 		int dof_Measurement;
-		double m_noise;
+		//double m_noise;
+		Eigen::Matrix<scalar_type, Eigen::Dynamic, 1> m_noise;
 		for(int i=0; i<maximum_iter; i++)
 		{
 			dyn_share.valid = true;
@@ -216,7 +218,8 @@ public:
 				HPHT = h_x * PHT.topRows(12);
 				for (int m = 0; m < dof_Measurement; m++)
 				{
-					HPHT(m, m) += m_noise;
+					//HPHT(m, m) += m_noise;
+					HPHT(m, m) += m_noise(m);
 				}
 				K_= PHT*HPHT.inverse();
 			}
@@ -226,6 +229,7 @@ public:
 				Matrix<scalar_type, n, n> P_inv = P_.inverse();
 				P_inv.template block<12, 12>(0, 0) += HTH;
 				P_inv = P_inv.inverse();
+				//K_ = P_inv.template block<n, 12>(0, 0) * h_x.transpose() * m_noise;
 				K_ = P_inv.template block<n, 12>(0, 0) * h_x.transpose() * m_noise;
 			}
 			Matrix<scalar_type, n, 1> dx_ = K_ * z; // - h) + (K_x - Matrix<scalar_type, n, n>::Identity()) * dx_new; 

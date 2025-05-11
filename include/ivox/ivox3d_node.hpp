@@ -3,6 +3,7 @@
 #include <cmath>
 #include <list>
 #include <vector>
+#include "common_lib.h"
 
 #include "hilbert.hpp"
 
@@ -37,6 +38,12 @@ template <>
 inline Eigen::Matrix<float, 3, 1> ToEigen<float, 3, pcl::PointXYZINormal>(const pcl::PointXYZINormal& pt) {
     return pt.getVector3fMap();
 }
+
+template <>
+inline Eigen::Matrix<float, 3, 1> ToEigen<float, 3, PointWithCov>(const PointWithCov& pt) {
+    return {pt.x, pt.y, pt.z};
+}
+
 
 template <typename PointT, int dim = 3>
 class IVoxNode {

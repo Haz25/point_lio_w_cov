@@ -117,18 +117,20 @@ void pointBodyLidarToIMU(PointType const * const pi, PointType * const po)
 }
 
 void MapIncremental() {
-    PointVector points_to_add;
-    int cur_pts = feats_down_world->size();
+    //PointVector points_to_add;
+    PointCovVector points_to_add;
+    int cur_pts = pv_list.size();
     points_to_add.reserve(cur_pts);
 
     for (size_t i = 0; i < cur_pts; ++i) {
         /* decide if need add to map */
-        PointType &point_world = feats_down_world->points[i];
+        //PointType &point_world = feats_down_world->points[i];
+        PointWithCov &pv = pv_list[i];
         if (!Nearest_Points[i].empty()) {
             const PointVector &points_near = Nearest_Points[i];
 
             Eigen::Vector3f center =
-                ((point_world.getVector3fMap() / filter_size_map_min).array().floor() + 0.5) * filter_size_map_min;
+                ((pv.getVector3fMap() / filter_size_map_min).array().floor() + 0.5) * filter_size_map_min;
             bool need_add = true;
             for (int readd_i = 0; readd_i < points_near.size(); readd_i++) {
                 Eigen::Vector3f dis_2_center = points_near[readd_i].getVector3fMap() - center;
@@ -140,13 +142,33 @@ void MapIncremental() {
                 }
             }
             if (need_add) {
-                points_to_add.emplace_back(point_world);
+                points_to_add.emplace_back(pv);
             }
         } else {
-            points_to_add.emplace_back(point_world);
+            points_to_add.emplace_back(pv);
         }
     }
     ivox_->AddPoints(points_to_add);
+    
+    /*
+    for (auto &pv: pv_list) {
+        V3D p(pv.x, pv.y, pv.z);
+        V3D p_w = 
+        M3D cov = calcWorldCov(p, pv.cov, kf_output);
+    }
+
+    PointCovVector points;
+    for(auto &pt_add: points_to_add) {
+        PointWithCov pt;
+        pt.x = pt_add.x;
+        pt.y = pt_add.y;
+        pt.z = pt_add.z;
+        pt.intensity = pt_add.intensity;
+        
+        points.emplace_back(pt);
+    }
+    ivox_->AddPoints(points);
+    */
 }
 
 void publish_init_map(const ros::Publisher & pubLaserCloudFullRes)
@@ -477,7 +499,7 @@ int main(int argc, char** argv)
             propag_time = 0;
             update_time = 0;
             t0 = omp_get_wtime();
-            
+
             /*** downsample the feature points in a scan ***/
             t1 = omp_get_wtime();
             p_imu->Process(Measures, feats_undistort);
@@ -491,11 +513,27 @@ int main(int argc, char** argv)
             {
                 feats_down_body = Measures.lidar;
                 sort(feats_down_body->points.begin(), feats_down_body->points.end(), time_list); 
-            }
+            }            
+
             {
                 time_seq = time_compressing<int>(feats_down_body);
                 feats_down_size = feats_down_body->points.size();
             }
+
+            // make pv list
+            pv_list.resize(feats_down_size);
+            for (int i = 0; i < feats_down_size; i++) {
+                auto &point = feats_down_body->points[i];
+                auto &pv = pv_list[i];
+                V3D p(point.x, point.y, point.z);
+                M3D cov = calcLidarCov(p, ranging_cov, angle_cov);
+                pv.x = point.x;
+                pv.y = point.y;
+                pv.z = point.z;
+                pv.intensity = point.intensity;
+                pv.cov = cov;
+            }
+            //
 
             if (!p_imu->after_imu_init_) // !p_imu->UseLIInit && 
             {
@@ -538,7 +576,22 @@ int main(int argc, char** argv)
                 {init_map = false;}
                 else
                 {   
-                    ivox_->AddPoints(init_feats_world->points);
+                    //ivox_->AddPoints(init_feats_world->points);
+
+                    PointCovVector points;
+                    for(auto &pt_add: init_feats_world->points) {
+                        PointWithCov pt;
+                        pt.x = pt_add.x;
+                        pt.y = pt_add.y;
+                        pt.z = pt_add.z;
+                        pt.intensity = pt_add.intensity;
+                        V3D p(pt.x, pt.y, pt.z);
+                        M3D cov = calcLidarCov(p, ranging_cov, angle_cov);
+                        pt.cov = cov;
+                        points.emplace_back(pt);
+                    }
+                    ivox_->AddPoints(points);
+                    
                     publish_init_map(pubLaserCloudMap); //(pubLaserCloudFullRes);
                     
                     init_feats_world.reset(new PointCloudXYZI());
@@ -700,11 +753,15 @@ int main(int argc, char** argv)
                         idx += time_seq[k];
                         continue;
                     }
+                    /*
                     if (!kf_output.update_iterated_dyn_share_modified()) 
                     {
                         idx = idx+time_seq[k];
                         continue;
                     }
+                    */
+                    
+                    kf_output.update_iterated_dyn_share_modified();
                     solve_start = omp_get_wtime();
                         
                     if (publish_odometry_without_downsample)
@@ -725,13 +782,22 @@ int main(int argc, char** argv)
                         PointType &point_body_j  = feats_down_body->points[idx+j+1];
                         PointType &point_world_j = feats_down_world->points[idx+j+1];
                         pointBodyToWorld(&point_body_j, &point_world_j);
+
+                        PointWithCov &pv = pv_list[idx+j+1];
+                        V3D p_b(pv.x, pv.y, pv.z);
+                        M3D cov_b = pv.cov;
+                        M3D cov = calcWorldCov(p_b, pv.cov, kf_output);
+                        pv.x = point_world_j.x;
+                        pv.y = point_world_j.y;
+                        pv.z = point_world_j.z;
+                        pv.cov = cov;
                     }
                 
                     solve_time += omp_get_wtime() - solve_start;
     
                     update_time += omp_get_wtime() - t_update_start;
                     idx += time_seq[k];
-                    // cout << "pbp output effect feat num:" << effct_feat_num << endl;
+                    //cout << "pbp output effect feat num:" << effct_feat_num << endl;
                 }
                 }
                 else
@@ -994,6 +1060,8 @@ int main(int argc, char** argv)
                     }
                 }
             }
+
+            cout << "effect feat num: " << effct_feat_num << endl;
             // M3D rot_cur_lidar;
             // {
             //     rot_cur_lidar = state.rot_end;
@@ -1053,6 +1121,8 @@ int main(int argc, char** argv)
                 }
                 dump_lio_state_to_log(fp);
             }
+            cout << "total processing time: " << omp_get_wtime() - t0 << endl;
+
         }
         status = ros::ok();
         loop_rate.sleep();

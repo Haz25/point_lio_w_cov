@@ -39,6 +39,9 @@ double lidar_time_inte = 0.1, first_imu_time = 0.0;
 int cut_frame_num = 1, orig_odom_freq = 10;
 double online_refine_time = 20.0; //unit: s
 bool cut_frame_init = false; // true;
+double ranging_cov = 0.1, angle_cov = 0.1;
+double sigma_num = 3.0;
+bool cov_on = false;
 
 MeasureGroup Measures;
 
@@ -83,6 +86,10 @@ void readParameters(ros::NodeHandle &nh)
   nh.param<double>("mapping/b_acc_cov",b_acc_cov,0.0001);
   nh.param<double>("mapping/imu_meas_acc_cov",imu_meas_acc_cov,0.1);
   nh.param<double>("mapping/imu_meas_omg_cov",imu_meas_omg_cov,0.1);
+  nh.param<double>("mapping/ranging_cov",ranging_cov,0.1);
+  nh.param<double>("mapping/angle_cov",angle_cov,0.1);
+  nh.param<double>("mapping/sigma_num",sigma_num,3.0);
+  nh.param<bool>("mapping/cov_on",cov_on,false);
   nh.param<double>("preprocess/blind", p_pre->blind, 1.0);
   nh.param<int>("preprocess/lidar_type", lidar_type, 1);
   nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);

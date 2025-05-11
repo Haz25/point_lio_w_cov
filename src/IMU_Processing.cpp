@@ -21,6 +21,7 @@ ImuProcess::ImuProcess()
   mean_gyr      = V3D(0, 0, 0);
   after_imu_init_ = false;
   state_cov.setIdentity();
+  //state_cov.setZero();
 }
 
 ImuProcess::~ImuProcess() {}

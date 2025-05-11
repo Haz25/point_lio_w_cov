@@ -12,9 +12,11 @@
 #include <unordered_set>
 
 extern PointCloudXYZI::Ptr normvec; //(new PointCloudXYZI(100000, 1));
+extern std::vector<PointPlane> ptpl_list;
 extern std::vector<int> time_seq;
 extern PointCloudXYZI::Ptr feats_down_body; //(new PointCloudXYZI());
 extern PointCloudXYZI::Ptr feats_down_world; //(new PointCloudXYZI());
+extern PointCovVector pv_list;
 extern std::vector<V3D> pbody_list;
 extern std::vector<PointVector> Nearest_Points; 
 extern std::shared_ptr<IVoxType> ivox_;                    // localmap in ivox
@@ -57,5 +59,9 @@ void h_model_output(state_output &s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_
 void h_model_IMU_output(state_output &s, esekfom::dyn_share_modified<double> &ekfom_data);
 
 void pointBodyToWorld(PointType const * const pi, PointType * const po);
+
+Matrix3d calcLidarCov(const Vector3d &p_body, const double ranging_cov, const double angle_cov);
+
+Matrix3d calcWorldCov(const Vector3d &p_body, const Matrix3d &cov_body, esekfom::esekf<state_output, 30, input_ikfom> &kf_output);
 
 #endif

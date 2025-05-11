@@ -29,7 +29,8 @@
 #ifdef IVOX_NODE_TYPE_PHC
     using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::PHC, PointType>;
 #else
-    using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::DEFAULT, PointType>;
+    //using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::DEFAULT, PointType>;
+    using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::DEFAULT, PointWithCov>;
 #endif
 
 extern bool is_first_frame;
@@ -72,6 +73,9 @@ extern int cut_frame_num, orig_odom_freq;
 extern double online_refine_time; //unit: s
 extern bool cut_frame_init;
 extern double time_update_last, time_current, time_predict_last_const, t_last;
+extern double ranging_cov, angle_cov;
+extern double sigma_num;
+extern bool cov_on;
 
 extern MeasureGroup Measures;
 
